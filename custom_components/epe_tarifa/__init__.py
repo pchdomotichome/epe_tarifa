@@ -179,10 +179,9 @@ class EpeCoordinator:
                 start,
                 end,
                 {entity},
-                False,   # include_start_time_state
-                None,    # significant_changes_only
-                True,    # minimal_response
-                True,    # no_attributes
+                False,        # include_start_time_state
+                None,         # significant_changes_only
+                True,         # minimal_response
             )
             states = rows.get(entity, [])
             if not states:
@@ -201,22 +200,30 @@ class EpeCoordinator:
     async def _sum_period_stats(self, entity: str, start: dt.datetime, end: dt.datetime) -> float:
         try:
             from homeassistant.components.recorder.statistics import statistics_during_period
-
-            res = await statistics_during_period(
-                self.hass, start, end, [entity], period="day", types=["sum"]
-            )
-            valid = [float(r["sum"]) for r in res.get(entity, []) if r.get("sum") is not None]
-            if valid:
-                return max(valid) - min(valid)
-            # reintento sin types (retrocompatibilidad)
-            res = await statistics_during_period(self.hass, start, end, [entity], period="day")
-            valid = [float(r.get("sum")) for r in res.get(entity, []) if r.get("sum") is not None]
-            if valid:
-                return max(valid) - min(valid)
+        except Exception:  # noqa: BLE001
             return 0.0
-        except Exception as exc:  # noqa: BLE001
-            _LOGGER.warning("epe_tarifa: fallo estadísticas %s → 0 (%s)", entity, exc)
-            return 0.0
+        # la firma de statistics_during_period varió entre versiones (units posicional,
+        # types/statistics_types); probamos variantes hasta obtener la correcta.
+        variants = [
+            lambda: statistics_during_period(self.hass, start, end, [entity], "day", None, ["sum"]),
+            lambda: statistics_during_period(self.hass, start, end, [entity], "day", None, types=["sum"]),
+            lambda: statistics_during_period(
+                self.hass, start, end, [entity], "day", None, statistics_types=["sum"]
+            ),
+            lambda: statistics_during_period(self.hass, start, end, [entity], "day", None),
+        ]
+        for call in variants:
+            try:
+                res = await call()
+                valid = [
+                    float(r["sum"]) for r in res.get(entity, []) if isinstance(r.get("sum"), (int, float))
+                ]
+                if valid:
+                    return max(valid) - min(valid)
+            except Exception as exc:  # noqa: BLE001
+                _LOGGER.debug("epe_tarifa: variante estadísticas descartada (%s)", exc)
+        _LOGGER.warning("epe_tarifa: sin datos de estadísticas para %s en la ventana → 0", entity)
+        return 0.0
 
     def _window(self, period: dict) -> tuple[dt.datetime, dt.datetime]:
         local = dt_util.get_time_zone(self.hass.config.time_zone)
