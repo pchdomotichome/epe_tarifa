@@ -25,6 +25,10 @@
       "name": "Registrar compra",
       "description": "Agrega gasto de inversión al ledger."
     },
+    "remove_purchase": {
+      "name": "Eliminar compra",
+      "description": "Quita una compra del ledger."
+    },
     "update_dolar_now": {
       "name": "Actualizar dólar",
       "description": "Refresca el dólar oficial."

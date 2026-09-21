@@ -336,9 +336,11 @@ class EpeCoordinator:
         values["meses_restantes"] = 0.0
         if inv_usd > 0 and ahorros:
             faltante = inv_usd - ahorro_usd
-            medio = sum(ahorros) / len(ahorros)
-            if faltante > 0 and medio > 0:
-                values["meses_restantes"] = round(faltante / medio, 1)
+            medio_periodo = sum(ahorros) / len(ahorros)
+            # los ahorros son por período bimestral (~60 días) → base mensual = /2
+            medio_mes = medio_periodo / 2.0
+            if faltante > 0 and medio_mes > 0:
+                values["meses_restantes"] = round(faltante / medio_mes, 1)
         values["ledger_count"] = len(self.ledger._data.get("list", []))
         attrs["bills"] = self.bills._data.get("list", [])
         attrs["ledger"] = self.ledger._data.get("list", [])
@@ -489,7 +491,18 @@ class EpeCoordinator:
         await self.async_recompute()
         return record
 
-    async def svc_import_history_csv(self, call: ServiceCall) -> dict:
+    async def svc_remove_purchase(self, call: ServiceCall) -> dict:
+        """Elimina una compra del ledger por índice (0-based)."""
+        index = int(call.data.get("index", -1))
+        items = self.ledger._data.get("list", [])
+        if not (0 <= index < len(items)):
+            raise HomeAssistantError(f"Índice fuera de rango: {index}")
+        removed = items.pop(index)
+        await self.ledger.async_save(dict(self.ledger._data))
+        await self.async_recompute()
+        return {"removido": removed}
+
+async def svc_import_history_csv(self, call: ServiceCall) -> dict:
         """Importa el histórico de facturas desde un CSV local y siembra el ahorro."""
         path = str(call.data.get(CONF_PATH, "www/epe/epe_historico.csv"))
         full = self.hass.config.path(path)
@@ -767,6 +780,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ),
         coordinator.svc_add_saved_period,
     )
+    _register(
+        "remove_purchase",
+        vol.Schema({vol.Required("index"): vol.Coerce(int)}),
+        coordinator.svc_remove_purchase,
+    )
     _register("update_dolar_now", vol.Schema({}), coordinator.svc_update_dolar)
     _register(
         "import_history_csv",
@@ -799,6 +817,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "set_period",
         "register_bill",
         "add_purchase",
+        "remove_purchase",
         "add_saved_period",
         "update_dolar_now",
         "import_history_csv",

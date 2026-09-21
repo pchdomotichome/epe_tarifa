@@ -125,6 +125,15 @@ add_saved_period:
       name: Nota
       example: "Bimestre 1/25"
 
+remove_purchase:
+  name: Eliminar compra
+  description: Quita una compra del ledger por índice (0-based).
+  fields:
+    index:
+      name: Índice
+      required: true
+      example: 0
+
 update_dolar_now:
   name: Actualizar dólar ahora
   description: Fuerza un refresco del dólar oficial venta.
