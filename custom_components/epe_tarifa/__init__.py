@@ -151,22 +151,43 @@ class EpeCoordinator:
 
     # ------------------------------------------------------------------ stats
 
-    async def _stat_sum(self, entity: str, start: dt.datetime, end: dt.datetime) -> float:
-        """Suma de deltas ('sum') del contador diario dentro de la ventana."""
-        try:
-            from homeassistant.components.recorder.statistics import statistics_during_period
+    async def _sum_period(self, entity: str, start: dt.datetime, end: dt.datetime) -> float:
+        """Suma los totales diarios del contador dentro de la ventana (máx por día local).
 
-            res = await statistics_during_period(
-                self.hass, start, end, {entity: ["sum"]}, period="day", types=["sum"]
-            )
-            total = 0.0
-            for row in res.get(entity, []):
-                val = row.get("sum")
-                if val is not None:
-                    total += float(val)
-            return total
+        Los contadores diarios (utility_meter) resetean a medianoche y crecen durante
+        el día; el total del día = máximo valor observado. Sumando día a día se obtiene
+        el consumo del período exacto, sin depender de metadatos de estadísticas.
+        """
+        try:
+            from homeassistant.components.recorder import get_instance, history
         except Exception as exc:  # noqa: BLE001
-            _LOGGER.warning("epe_tarifa: fallo consulta estadísticas %s → 0 (%s)", entity, exc)
+            _LOGGER.warning("epe_tarifa: recorder no disponible (%s)", exc)
+            return 0.0
+        try:
+            inst = get_instance(self.hass)
+            rows = await inst.async_add_executor_job(
+                history.get_significant_states,
+                self.hass,
+                start,
+                end,
+                {entity},
+                False,   # include_start_time_state
+                None,    # significant_changes_only (default)
+                True,    # minimal_response
+                True,    # no_attributes
+            )
+            states = rows.get(entity, [])
+            if not states:
+                return 0.0
+            local = dt_util.get_time_zone(self.hass.config.time_zone)
+            by_day: dict[str, float] = {}
+            for st in states:
+                val = float(st.state) if st.state not in (None, "", "unknown", "unavailable") else 0.0
+                day = st.last_updated.astimezone(local).strftime("%Y-%m-%d")
+                by_day[day] = max(by_day.get(day, 0.0), val)
+            return sum(by_day.values())
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.warning("epe_tarifa: fallo historial %s → 0 (%s)", entity, exc)
             return 0.0
 
     def _window(self, period: dict) -> tuple[dt.datetime, dt.datetime]:
@@ -205,8 +226,8 @@ class EpeCoordinator:
         kwh_epe_bill = kwh_home_bill = 0.0
         if period.get("start") and period.get("end"):
             w_s, w_e = self._window(period)
-            kwh_epe_bill = await self._stat_sum(SENSOR_EPE, w_s, w_e)
-            kwh_home_bill = await self._stat_sum(SENSOR_HOME, w_s, w_e)
+            kwh_epe_bill = await self._sum_period(SENSOR_EPE, w_s, w_e)
+            kwh_home_bill = await self._sum_period(SENSOR_HOME, w_s, w_e)
 
         trifasica = max(0.0, kwh_meter - kwh_epe_bill)
         if trifasica > 0:
@@ -216,8 +237,8 @@ class EpeCoordinator:
 
         now = dt_util.utcnow()
         roll_start = now - dt.timedelta(days=dias)
-        epe_roll = await self._stat_sum(SENSOR_EPE, roll_start, now)
-        home_roll = await self._stat_sum(SENSOR_HOME, roll_start, now)
+        epe_roll = await self._sum_period(SENSOR_EPE, roll_start, now)
+        home_roll = await self._sum_period(SENSOR_HOME, roll_start, now)
 
         kwh_red_proj = epe_roll + trifasica_dia * dias
         proyectado = fancy_total(kwh_red_proj, tariff, meses)
@@ -339,8 +360,8 @@ class EpeCoordinator:
         tmp["start"], tmp["end"] = start, end
         tmp["kwh_meter"] = kwh_meter
         w_s, w_e = self._window(tmp)
-        kwh_epe = await self._stat_sum(SENSOR_EPE, w_s, w_e)
-        kwh_home = await self._stat_sum(SENSOR_HOME, w_s, w_e)
+        kwh_epe = await self._sum_period(SENSOR_EPE, w_s, w_e)
+        kwh_home = await self._sum_period(SENSOR_HOME, w_s, w_e)
         trifasica = max(0.0, kwh_meter - kwh_epe)
 
         period = dict(self.period._data)
@@ -410,6 +431,25 @@ class EpeCoordinator:
     async def svc_update_dolar(self, _call: ServiceCall) -> dict:
         ok = await self.async_refresh_dolar()
         return {"ok": ok, **self.dolar._data}
+
+    async def svc_add_saved_period(self, call: ServiceCall) -> dict:
+        """Registra un período de ahorro manual (histórico CSV o factura con datos propios)."""
+        data = call.data
+        tstamp = data.get("fecha") or dt.datetime.now().isoformat(timespec="seconds")
+        record = {
+            "fecha": tstamp,
+            "start": str(data.get(CONF_START, "")),
+            "end": str(data.get(CONF_END, "")),
+            "ahorro_kwh": float(data.get(CONF_AHORRO_KWH, 0)),
+            "ahorro_usd": float(data.get(CONF_AHORRO_USD, 0)),
+            "dolar": data.get("dolar"),
+            "nota": data.get("nota", ""),
+        }
+        self.savings._data.setdefault("list", []).append(record)
+        self.savings._data["list"].sort(key=lambda x: str(x.get("fecha", "")))
+        await self.savings.async_save(dict(self.savings._data))
+        await self.async_recompute()
+        return record
 
     async def svc_import_cut_month(self, call: ServiceCall) -> dict:
         path = str(call.data[CONF_PATH])
@@ -545,6 +585,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ),
         coordinator.svc_add_purchase,
     )
+    _register(
+        "add_saved_period",
+        vol.Schema(
+            {
+                vol.Optional("fecha"): cv.string,
+                vol.Optional(CONF_START): cv.string,
+                vol.Optional(CONF_END): cv.string,
+                vol.Required(CONF_AHORRO_KWH): cv.positive_float,
+                vol.Required(CONF_AHORRO_USD): cv.positive_float,
+                vol.Optional("dolar"): cv.positive_float,
+                vol.Optional("nota"): cv.string,
+            }
+        ),
+        coordinator.svc_add_saved_period,
+    )
     _register("update_dolar_now", vol.Schema({}), coordinator.svc_update_dolar)
     _register(
         "import_cut_month",
@@ -568,6 +623,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "set_period",
         "register_bill",
         "add_purchase",
+        "add_saved_period",
         "update_dolar_now",
         "import_cut_month",
     ):

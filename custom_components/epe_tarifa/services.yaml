@@ -103,6 +103,28 @@ add_purchase:
       required: true
       example: 1154248.09
 
+add_saved_period:
+  name: Registrar período de ahorro
+  description: Carga un período histórico de ahorro (kWh y USD) — para seedear desde CSV o facturas previas.
+  fields:
+    start:
+      name: Inicio período
+      example: "2024-10-25"
+    end:
+      name: Fin período
+      example: "2024-12-20"
+    ahorro_kwh:
+      name: kWh ahorrados
+      required: true
+    ahorro_usd:
+      name: Ahorro en USD
+      required: true
+    dolar:
+      name: Dólar de referencia del período
+    nota:
+      name: Nota
+      example: "Bimestre 1/25"
+
 update_dolar_now:
   name: Actualizar dólar ahora
   description: Fuerza un refresco del dólar oficial venta.
