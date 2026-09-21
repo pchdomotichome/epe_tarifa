@@ -192,8 +192,15 @@ class EpeCoordinator:
             local = dt_util.get_time_zone(self.hass.config.time_zone)
             by_day: dict[str, float] = {}
             for st in states:
-                val = float(st.state) if st.state not in (None, "", "unknown", "unavailable") else 0.0
-                day = st.last_updated.astimezone(local).strftime("%Y-%m-%d")
+                if isinstance(st, dict):
+                    val = float(st.get("state")) if st.get("state") not in (None, "", "unknown", "unavailable") else 0.0
+                    ts = st.get("last_updated") or st.get("lu") or st.get("last_changed")
+                else:
+                    val = float(st.state) if st.state not in (None, "", "unknown", "unavailable") else 0.0
+                    ts = st.last_updated
+                if ts is None:
+                    continue
+                day = ts.astimezone(local).strftime("%Y-%m-%d")
                 by_day[day] = max(by_day.get(day, 0.0), val)
             return sum(by_day.values())
         except Exception as exc:  # noqa: BLE001
@@ -203,19 +210,14 @@ class EpeCoordinator:
     async def _sum_period_stats(self, entity: str, start: dt.datetime, end: dt.datetime) -> float:
         try:
             from homeassistant.components.recorder.statistics import statistics_during_period
+            from homeassistant.components.recorder import get_instance
         except Exception:  # noqa: BLE001
             return 0.0
         try:
-            res = await statistics_during_period(
-                self.hass, start, end, {entity}, "day", None, {"sum"}
-            )
-            _LOGGER.warning(
-                "EPEDBG %s window=%s..%s rows=%d sums=%s",
-                entity,
-                start.isoformat(),
-                end.isoformat(),
-                len(res.get(entity, [])),
-                [round(float(r["sum"]), 3) for r in res.get(entity, [])[:3]] if res.get(entity) else [],
+            inst = get_instance(self.hass)
+            # statistics_during_period es síncrona → se ejecuta en el executor del recorder
+            res = await inst.async_add_executor_job(
+                statistics_during_period, self.hass, start, end, {entity}, "day", None, {"sum"}
             )
             valid = [
                 float(r["sum"]) for r in res.get(entity, []) if isinstance(r.get("sum"), (int, float))
