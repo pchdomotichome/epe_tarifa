@@ -1,0 +1,13 @@
+{
+  "name": "EPE Tarifa y Amortización",
+  "filename": "manifest.json",
+  "render_readme": true,
+  "hide_default_branch": true,
+  "homeassistant": "2025.5.0",
+  "content_in_root": false,
+  "zip_release": false,
+  "hacs": "2.0.0",
+  "country": ["AR"],
+  "domains": ["epe_tarifa"],
+  "iot_class": "cloud_polling"
+}

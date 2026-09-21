@@ -1,0 +1,37 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "EPE Tarifa",
+        "description": "Crea la integración con los valores por defecto (última factura). Luego ajustá cuadro tarifario y período con los servicios `epe_tarifa.update_tariff` y `epe_tarifa.set_period`.",
+        "data": {}
+      }
+    }
+  },
+  "services": {
+    "update_tariff": {
+      "name": "Actualizar tarifa",
+      "description": "Actualiza el cuadro tarifario vigente."
+    },
+    "set_period": {
+      "name": "Definir período",
+      "description": "Fija la ventana del bimestre."
+    },
+    "register_bill": {
+      "name": "Registrar factura",
+      "description": "Carga la factura real para ahorro y desvío."
+    },
+    "add_purchase": {
+      "name": "Registrar compra",
+      "description": "Agrega gasto de inversión al ledger."
+    },
+    "update_dolar_now": {
+      "name": "Actualizar dólar",
+      "description": "Refresca el dólar oficial."
+    },
+    "import_cut_month": {
+      "name": "Importar CUT",
+      "description": "Parsea un PDF del cuadro tarifario."
+    }
+  }
+}

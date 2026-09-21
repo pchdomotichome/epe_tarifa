@@ -1,0 +1,120 @@
+update_tariff:
+  name: Actualizar tarifa
+  description: Actualiza el cuadro tarifario vigente (cuota, bloques, impuestos, CAP).
+  fields:
+    month:
+      name: Mes de vigencia
+      description: "Formato YYYY-MM, p.ej. 2026-09"
+      example: "2026-09"
+    cuota_servicio:
+      name: Cuota de servicio
+      description: Valor mensual en ARS
+      example: 3560.17
+    p1:
+      name: Precio bloque 1
+      description: Primeros 150 kWh/mes (ARS/kWh)
+      example: 231.7594
+    p2:
+      name: Precio bloque 2
+      description: Segundos 150 kWh/mes (ARS/kWh)
+      example: 259.4194
+    p3:
+      name: Precio bloque 3
+      description: Excedente de 300 kWh/mes (ARS/kWh)
+      example: 354.1072
+    cap_bands:
+      name: Bandas CAP
+      description: "Lista de dicts [{'hasta': 450, 'valor': 8944.22}] (ARS/mes)"
+    ley12692:
+      name: Ley 12692
+      description: Energías Renovables, ARS por mes
+      example: 230.81
+    pct_6604:
+      name: Ley 6604 (%)
+      description: Impuesto provincial sobre Básico
+      example: 1.5
+    pct_7797:
+      name: Ley 7797 (%)
+      description: Impuesto municipal sobre Básico
+      example: 6.0
+    pct_iva:
+      name: IVA (%)
+      description: Sobre Básico + CAP
+      example: 21.0
+
+set_period:
+  name: Definir período de facturación
+  description: Fija la ventana del bimestre (fechas, días y kWh del medidor).
+  fields:
+    start:
+      name: Inicio
+      description: "YYYY-MM-DD"
+      example: "2026-06-22"
+    end:
+      name: Fin
+      description: "YYYY-MM-DD"
+      example: "2026-08-21"
+    dias:
+      name: Días
+      description: Duración del período
+      example: 60
+    kwh_meter:
+      name: kWh medidor
+      description: Consumo total según medidor de la empresa
+      example: 359
+
+register_bill:
+  name: Registrar factura real
+  description: Carga la factura emitida por EPE y recalcula trifásica, desvío y ahorro USD.
+  fields:
+    start:
+      name: Inicio período
+      required: true
+      example: "2026-06-22"
+    end:
+      name: Fin período
+      required: true
+      example: "2026-08-21"
+    kwh_meter:
+      name: kWh medidor
+      required: true
+      example: 359
+    total_ars:
+      name: Total factura (ARS)
+      required: true
+      example: 151494.88
+
+add_purchase:
+  name: Registrar compra
+  description: Agrega un gasto de inversión al ledger (paneles, inversor, baterías...).
+  fields:
+    fecha:
+      name: Fecha
+      example: "2024-10-21"
+    producto:
+      name: Producto
+      example: "Inversor Growatt 6kW"
+    usd:
+      name: Valor USD
+      required: true
+      example: 952.02
+    ars:
+      name: Valor ARS
+      required: true
+      example: 1154248.09
+
+update_dolar_now:
+  name: Actualizar dólar ahora
+  description: Fuerza un refresco del dólar oficial venta.
+
+import_cut_month:
+  name: Importar Cuadro Tarifario
+  description: Parsea un PDF del CUT (local) y actualiza la tarifa vigente.
+  fields:
+    path:
+      name: Ruta del PDF
+      required: true
+      example: "/config/www/epe/CUT_2026_09.pdf"
+    month:
+      name: Mes de vigencia
+      example: "2026-09"

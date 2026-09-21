@@ -1,0 +1,7 @@
+# tokens / secrets never
+*.env
+.env
+.token*
+.gh_token*
+__pycache__/
+*.py[cod]
