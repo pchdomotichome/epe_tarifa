@@ -152,16 +152,24 @@ class EpeCoordinator:
     # ------------------------------------------------------------------ stats
 
     async def _sum_period(self, entity: str, start: dt.datetime, end: dt.datetime) -> float:
-        """Suma los totales diarios del contador dentro de la ventana (máx por día local).
+        """Consumo de un contador dentro de la ventana.
 
-        Los contadores diarios (utility_meter) resetean a medianoche y crecen durante
-        el día; el total del día = máximo valor observado. Sumando día a día se obtiene
-        el consumo del período exacto, sin depender de metadatos de estadísticas.
+        Estrategia:
+        1. Historial de estados reciente (máx por día local). Cubre solo la
+           ventana retenida por el recorder (purge ~10 días).
+        2. Estadísticas de largo plazo (retención permanente): la serie 'sum'
+           de un medidor es acumulada → el consumo de la ventana = último −
+           primero.
         """
+        total = await self._sum_period_hist(entity, start, end)
+        if total > 0:
+            return total
+        return await self._sum_period_stats(entity, start, end)
+
+    async def _sum_period_hist(self, entity: str, start: dt.datetime, end: dt.datetime) -> float:
         try:
             from homeassistant.components.recorder import get_instance, history
-        except Exception as exc:  # noqa: BLE001
-            _LOGGER.warning("epe_tarifa: recorder no disponible (%s)", exc)
+        except Exception:  # noqa: BLE001
             return 0.0
         try:
             inst = get_instance(self.hass)
@@ -172,7 +180,7 @@ class EpeCoordinator:
                 end,
                 {entity},
                 False,   # include_start_time_state
-                None,    # significant_changes_only (default)
+                None,    # significant_changes_only
                 True,    # minimal_response
                 True,    # no_attributes
             )
@@ -187,7 +195,27 @@ class EpeCoordinator:
                 by_day[day] = max(by_day.get(day, 0.0), val)
             return sum(by_day.values())
         except Exception as exc:  # noqa: BLE001
-            _LOGGER.warning("epe_tarifa: fallo historial %s → 0 (%s)", entity, exc)
+            _LOGGER.warning("epe_tarifa: fallo historial %s (%s)", entity, exc)
+            return 0.0
+
+    async def _sum_period_stats(self, entity: str, start: dt.datetime, end: dt.datetime) -> float:
+        try:
+            from homeassistant.components.recorder.statistics import statistics_during_period
+
+            res = await statistics_during_period(
+                self.hass, start, end, [entity], period="day", types=["sum"]
+            )
+            valid = [float(r["sum"]) for r in res.get(entity, []) if r.get("sum") is not None]
+            if valid:
+                return max(valid) - min(valid)
+            # reintento sin types (retrocompatibilidad)
+            res = await statistics_during_period(self.hass, start, end, [entity], period="day")
+            valid = [float(r.get("sum")) for r in res.get(entity, []) if r.get("sum") is not None]
+            if valid:
+                return max(valid) - min(valid)
+            return 0.0
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.warning("epe_tarifa: fallo estadísticas %s → 0 (%s)", entity, exc)
             return 0.0
 
     def _window(self, period: dict) -> tuple[dt.datetime, dt.datetime]:
