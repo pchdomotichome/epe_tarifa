@@ -502,7 +502,7 @@ class EpeCoordinator:
         await self.async_recompute()
         return {"removido": removed}
 
-async def svc_import_history_csv(self, call: ServiceCall) -> dict:
+    async def svc_import_history_csv(self, call: ServiceCall) -> dict:
         """Importa el histórico de facturas desde un CSV local y siembra el ahorro."""
         path = str(call.data.get(CONF_PATH, "www/epe/epe_historico.csv"))
         full = self.hass.config.path(path)
