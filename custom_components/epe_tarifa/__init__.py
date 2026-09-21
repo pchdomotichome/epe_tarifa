@@ -209,6 +209,14 @@ class EpeCoordinator:
             res = await statistics_during_period(
                 self.hass, start, end, {entity}, "day", None, {"sum"}
             )
+            _LOGGER.warning(
+                "EPEDBG %s window=%s..%s rows=%d sums=%s",
+                entity,
+                start.isoformat(),
+                end.isoformat(),
+                len(res.get(entity, [])),
+                [round(float(r["sum"]), 3) for r in res.get(entity, [])[:3]] if res.get(entity) else [],
+            )
             valid = [
                 float(r["sum"]) for r in res.get(entity, []) if isinstance(r.get("sum"), (int, float))
             ]
