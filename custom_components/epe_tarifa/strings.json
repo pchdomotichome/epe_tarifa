@@ -29,6 +29,10 @@
       "name": "Actualizar dólar",
       "description": "Refresca el dólar oficial."
     },
+    "import_history_csv": {
+      "name": "Importar histórico CSV",
+      "description": "Importa facturas históricas y siembra ahorro."
+    },
     "import_cut_month": {
       "name": "Importar CUT",
       "description": "Parsea un PDF del cuadro tarifario."

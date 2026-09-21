@@ -129,6 +129,15 @@ update_dolar_now:
   name: Actualizar dólar ahora
   description: Fuerza un refresco del dólar oficial venta.
 
+import_history_csv:
+  name: Importar histórico CSV
+  description: Importa facturas históricas (CSV ';') y siembra el ahorro acumulado para amortización.
+  fields:
+    path:
+      name: Ruta del CSV
+      description: "Relativo a /config, p.ej. www/epe/epe_historico.csv"
+      example: "www/epe/epe_historico.csv"
+
 import_cut_month:
   name: Importar Cuadro Tarifario
   description: Parsea un PDF del CUT (local) y actualiza la tarifa vigente.

@@ -451,6 +451,135 @@ class EpeCoordinator:
         await self.async_recompute()
         return record
 
+    async def svc_import_history_csv(self, call: ServiceCall) -> dict:
+        """Importa el histórico de facturas desde un CSV local y siembra el ahorro."""
+        path = str(call.data.get(CONF_PATH, "www/epe/epe_historico.csv"))
+        full = self.hass.config.path(path)
+        dolar = self.dolar._data.get("venta")
+        records = await self.hass.async_add_executor_job(self._parse_history_csv, full, dolar)
+
+        added_bills = added_saved = 0
+        for rec in records:
+            self.bills._data.setdefault("list", []).append(rec["bill"])
+            added_bills += 1
+            if rec.get("saved"):
+                self.savings._data.setdefault("list", []).append(rec["saved"])
+                added_saved += 1
+        if records:
+            self.savings._data["list"].sort(key=lambda x: str(x.get("fecha", "")))
+            await self.bills.async_save(dict(self.bills._data))
+            await self.savings.async_save(dict(self.savings._data))
+        await self.async_recompute()
+        return {"filas_parseadas": len(records), "facturas": added_bills, "ahorros": added_saved}
+
+    @staticmethod
+    def _parse_history_csv(full: str, dolar: float | None) -> list[dict]:
+        import csv as _csv
+        import os
+
+        if not os.path.exists(full):
+            raise HomeAssistantError(f"CSV no encontrado: {full}")
+        with open(full, encoding="utf-8-sig", newline="") as fh:
+            content = fh.read()
+        delimiter = ";" if ";" in content.splitlines()[0] else ","
+        reader = list(_csv.reader(content.splitlines(), delimiter=delimiter))
+        if not reader:
+            return []
+
+        def norm(x: str) -> str:
+            return (x or "").strip().lower().replace(" ", "_").replace("á", "a")
+
+        header = [norm(c) for c in reader[0]]
+        aliases = {
+            "inicio": ["inicio", "desde", "inicio_periodo", "fecha_inicio", "ini", "inicio_periodo"],
+            "fin": ["fin", "hasta", "fecha_fin", "fin_periodo"],
+            "kwh": ["kwh", "kwh_facturado", "consumo", "kwh_meter", "kwh_medidor", "kwh_factura"],
+            "total": ["total", "total_ars", "importe", "monto", "monto_factura"],
+            "ahorro_kwh": ["ahorro_kwh", "kwh_ahorrado", "ahorro", "kwh_ahorro"],
+            "dolar": ["dolar", "dolar_ref", "usd"],
+            "nota": ["nota", "observacion", "periodo", "descripcion"],
+            "fecha": ["fecha", "fecha_factura", "fechafactura", "fecha_emision"],
+        }
+        col = {}
+        for key, words in aliases.items():
+            for i, h in enumerate(header):
+                if h in words:
+                    col[key] = i
+                    break
+        if "kwh" not in col or "total" not in col:
+            # template posicional: inicio;fin;kwh;total;ahorro;dolar;nota
+            col = {"inicio": 0, "fin": 1, "kwh": 2, "total": 3, "ahorro_kwh": 4, "dolar": 5, "nota": 6}
+
+        def _num(v):
+            if v in (None, ""):
+                return None
+            s = str(v).strip()
+            try:
+                if "," in s and "." in s and s.rfind(",") > s.rfind("."):
+                    s = s.replace(".", "").replace(",", ".")
+                elif "," in s:
+                    s = s.replace(",", ".")
+                return float(s)
+            except ValueError:
+                return None
+
+        def _date(v):
+            if v in (None, ""):
+                return None
+            s = str(v).strip()
+            for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d"):
+                try:
+                    return dt.datetime.strptime(s, fmt).strftime("%Y-%m-%d")
+                except ValueError:
+                    continue
+            return None
+
+        out = []
+        for row in reader[1:]:
+            if len(row) < 2 or not row[0].strip():
+                continue
+            kwh = _num(row[col["kwh"]]) if col.get("kwh") is not None and len(row) > col["kwh"] else None
+            total = _num(row[col["total"]]) if col.get("total") is not None and len(row) > col["total"] else None
+            if not kwh or not total:
+                continue
+            inicio = _date(row[col["inicio"]]) if col.get("inicio") is not None and len(row) > col.get("inicio", 0) else None
+            fin = _date(row[col["fin"]]) if col.get("fin") is not None and len(row) > col.get("fin", 0) else None
+            ahorro_kwh = _num(row[col["ahorro_kwh"]]) if col.get("ahorro_kwh") is not None and len(row) > col["ahorro_kwh"] else None
+            dolar_row = _num(row[col["dolar"]]) if col.get("dolar") is not None and len(row) > col["dolar"] else None
+            nota_idx = col.get("nota")
+            nota = row[nota_idx].strip() if nota_idx is not None and len(row) > nota_idx else ""
+            fecha_idx = col.get("fecha")
+            fecha = _date(row[fecha_idx]) if fecha_idx is not None and len(row) > fecha_idx else inicio or dt.datetime.now().strftime("%Y-%m-%d")
+
+            blended = total / kwh if kwh else 0.0
+            dolar_ef = dolar_row or dolar
+            saved = None
+            if ahorro_kwh and dolar_ef:
+                saved = {
+                    "fecha": fecha,
+                    "start": inicio or "",
+                    "end": fin or "",
+                    "ahorro_kwh": round(ahorro_kwh, 2),
+                    "ahorro_usd": round(ahorro_kwh * blended / float(dolar_ef), 2),
+                    "dolar": float(dolar_ef),
+                    "nota": nota,
+                }
+            bill = {
+                "fecha": fecha,
+                "start": inicio or "",
+                "end": fin or "",
+                "kwh_meter": round(kwh, 0),
+                "total_ars": round(total, 0),
+                "blended": round(blended, 2),
+                "historico": True,
+                "nota": nota,
+            }
+            item = {"bill": bill}
+            if saved:
+                item["saved"] = saved
+            out.append(item)
+        return out
+
     async def svc_import_cut_month(self, call: ServiceCall) -> dict:
         path = str(call.data[CONF_PATH])
         month = call.data.get(CONF_MONTH)
@@ -602,6 +731,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     _register("update_dolar_now", vol.Schema({}), coordinator.svc_update_dolar)
     _register(
+        "import_history_csv",
+        vol.Schema(
+            {
+                vol.Optional(CONF_PATH): cv.string,
+            }
+        ),
+        coordinator.svc_import_history_csv,
+    )
+    _register(
         "import_cut_month",
         vol.Schema(
             {
@@ -625,6 +763,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "add_purchase",
         "add_saved_period",
         "update_dolar_now",
+        "import_history_csv",
         "import_cut_month",
     ):
         if hass.services.has_service(DOMAIN, service):

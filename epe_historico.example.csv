@@ -1,0 +1,36 @@
+﻿# EPE Historico de Facturas - importar con epe_tarifa.import_history_csv
+# Delimiter ';' (Excel AR). Decimales con coma (ej. 151494,88) o punto.
+# Columnas: inicio;fin;kwh_facturado;total_ars;ahorro_kwh;dolar;nota
+# - kwh_facturado y total_ars: obligatorios (medidor y total de la factura)
+# - ahorro_kwh: solo periodos con FV (desde 25/10/24); si la dejas vacia no suma ahorro
+# - dolar: opcional (si esta vacio se usa el dolar oficial del dia del import)
+# - ahorro_kwh x (total_ars/kwh_facturado) / dolar = ahorro_usd acumulado
+inicio;fin;kwh_facturado;total_ars;ahorro_kwh;dolar;nota
+2022-02-15;2022-04-15;;;;Bimestre 04/22
+2022-04-16;2022-06-14;;;;Bimestre 06/22
+2022-06-15;2022-08-13;;;;Bimestre 08/22
+2022-08-14;2022-10-12;;;;Bimestre 10/22
+2022-10-13;2022-12-11;;;;Bimestre 12/22
+2022-12-12;2023-02-09;;;;Bimestre 02/23
+2023-02-10;2023-04-10;;;;Bimestre 04/23
+2023-04-11;2023-06-09;;;;Bimestre 06/23
+2023-06-10;2023-08-08;;;;Bimestre 08/23
+2023-08-09;2023-10-07;;;;Bimestre 10/23
+2023-10-08;2023-12-06;;;;Bimestre 12/23
+2023-12-07;2024-02-04;;;;Bimestre 02/24
+2024-02-05;2024-04-04;;;;Bimestre 04/24
+2024-04-05;2024-06-03;;;;Bimestre 06/24
+2024-06-04;2024-08-02;;;;Bimestre 08/24
+2024-08-03;2024-10-01;;;;Bimestre 10/24
+2024-10-02;2024-11-30;;;;Bimestre 11/24
+2024-12-01;2025-01-29;;;;;Bimestre 01/25
+2025-01-30;2025-03-30;;;;;Bimestre 03/25
+2025-03-31;2025-05-29;;;;;Bimestre 05/25
+2025-05-30;2025-07-28;;;;;Bimestre 07/25
+2025-07-29;2025-09-26;;;;;Bimestre 09/25
+2025-09-27;2025-11-25;;;;;Bimestre 11/25
+2025-11-26;2026-01-24;;;;;Bimestre 01/26
+2026-01-25;2026-03-25;;;;;Bimestre 03/26
+2026-03-26;2026-05-24;;;;;Bimestre 05/26
+2026-05-25;2026-07-23;;;;;Bimestre 07/26
+2026-07-24;2026-09-21;;;;;Bimestre 09/26

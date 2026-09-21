@@ -9,5 +9,5 @@
   "issue_tracker": "https://localhost/epe_tarifa/issues",
   "iot_class": "cloud_polling",
   "requirements": ["pdfminer.six>=20221105"],
-  "version": "0.1.1"
+  "version": "0.1.2"
 }
