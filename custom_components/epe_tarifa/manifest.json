@@ -1,13 +1,19 @@
 {
   "domain": "epe_tarifa",
   "name": "EPE Tarifa y Amortización",
-  "codeowners": ["@local"],
+  "codeowners": [
+    "@local"
+  ],
   "config_flow": true,
-  "after_dependencies": ["recorder"],
+  "after_dependencies": [
+    "recorder"
+  ],
   "dependencies": [],
   "documentation": "https://localhost/epe_tarifa",
   "issue_tracker": "https://localhost/epe_tarifa/issues",
   "iot_class": "cloud_polling",
-  "requirements": ["pdfminer.six>=20221105"],
-  "version": "0.1.8"
+  "requirements": [
+    "pdfminer.six>=20221105"
+  ],
+  "version": "0.1.9"
 }
