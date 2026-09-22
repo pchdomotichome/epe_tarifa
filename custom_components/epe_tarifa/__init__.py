@@ -503,25 +503,31 @@ class EpeCoordinator:
         return {"removido": removed}
 
     async def svc_import_history_csv(self, call: ServiceCall) -> dict:
-        """Importa el histórico de facturas desde un CSV local y siembra el ahorro."""
+        """Sincroniza el histórico de facturas desde un CSV local (reemplaza bills+savings).
+
+        Es un sync completo: al importar se reconstruyen las listas de facturas y
+        de ahorros desde cero. Re-ejecutar el servicio tras corregir el CSV o el
+        parser repara el estado sin duplicar registros.
+        """
         path = str(call.data.get(CONF_PATH, "www/epe/epe_historico.csv"))
         full = self.hass.config.path(path)
         dolar = self.dolar._data.get("venta")
         records = await self.hass.async_add_executor_job(self._parse_history_csv, full, dolar)
 
-        added_bills = added_saved = 0
-        for rec in records:
-            self.bills._data.setdefault("list", []).append(rec["bill"])
-            added_bills += 1
-            if rec.get("saved"):
-                self.savings._data.setdefault("list", []).append(rec["saved"])
-                added_saved += 1
-        if records:
-            self.savings._data["list"].sort(key=lambda x: str(x.get("fecha", "")))
-            await self.bills.async_save(dict(self.bills._data))
-            await self.savings.async_save(dict(self.savings._data))
+        bills = [rec["bill"] for rec in records]
+        savings = [rec["saved"] for rec in records if rec.get("saved")]
+        savings.sort(key=lambda x: str(x.get("fecha", "")))
+        self.bills._data["list"] = bills
+        self.savings._data["list"] = savings
+        await self.bills.async_save(dict(self.bills._data))
+        await self.savings.async_save(dict(self.savings._data))
         await self.async_recompute()
-        return {"filas_parseadas": len(records), "facturas": added_bills, "ahorros": added_saved}
+        return {
+            "filas_parseadas": len(records),
+            "facturas": len(bills),
+            "ahorros": len(savings),
+            "ahorro_usd_acumulado": round(sum(float(s.get("ahorro_usd", 0) or 0) for s in savings), 2),
+        }
 
     @staticmethod
     def _parse_history_csv(full: str, dolar: float | None) -> list[dict]:
@@ -545,7 +551,9 @@ class EpeCoordinator:
             "inicio": ["inicio", "desde", "inicio_periodo", "fecha_inicio", "ini", "inicio_periodo"],
             "fin": ["fin", "hasta", "fecha_fin", "fin_periodo"],
             "kwh": ["kwh", "kwh_facturado", "consumo", "kwh_meter", "kwh_medidor", "kwh_factura"],
-            "total": ["total", "total_ars", "importe", "monto", "monto_factura"],
+            "kwh_real": ["kwh_real_consumido", "kwh_real", "kwh_consumido", "kwh_medidor_real", "consumo_real"],
+            "total": ["total", "total_ars", "total_factura_ars", "importe", "monto", "monto_factura"],
+            "sin_fv": ["total_sin_fv_ars", "total_sin_fv", "sin_fv", "total_factura_sin_fv_ars", "sin_fv_ars"],
             "ahorro_kwh": ["ahorro_kwh", "kwh_ahorrado", "ahorro", "kwh_ahorro"],
             "dolar": ["dolar", "dolar_ref", "usd"],
             "nota": ["nota", "observacion", "periodo", "descripcion"],
@@ -585,36 +593,49 @@ class EpeCoordinator:
                     continue
             return None
 
+        def _get(idx):
+            if idx is None or len(row) <= idx:
+                return None
+            return row[idx].strip() if row[idx] is not None else None
+
         out = []
         for row in reader[1:]:
             if len(row) < 2 or not row[0].strip():
                 continue
-            kwh = _num(row[col["kwh"]]) if col.get("kwh") is not None and len(row) > col["kwh"] else None
-            total = _num(row[col["total"]]) if col.get("total") is not None and len(row) > col["total"] else None
+            kwh = _num(_get(col.get("kwh")))
+            total = _num(_get(col.get("total")))
             if not kwh or not total:
                 continue
-            inicio = _date(row[col["inicio"]]) if col.get("inicio") is not None and len(row) > col.get("inicio", 0) else None
-            fin = _date(row[col["fin"]]) if col.get("fin") is not None and len(row) > col.get("fin", 0) else None
-            ahorro_kwh = _num(row[col["ahorro_kwh"]]) if col.get("ahorro_kwh") is not None and len(row) > col["ahorro_kwh"] else None
-            dolar_row = _num(row[col["dolar"]]) if col.get("dolar") is not None and len(row) > col["dolar"] else None
-            nota_idx = col.get("nota")
-            nota = row[nota_idx].strip() if nota_idx is not None and len(row) > nota_idx else ""
-            fecha_idx = col.get("fecha")
-            fecha = _date(row[fecha_idx]) if fecha_idx is not None and len(row) > fecha_idx else inicio or dt.datetime.now().strftime("%Y-%m-%d")
+            inicio = _date(_get(col.get("inicio")))
+            fin = _date(_get(col.get("fin")))
+            kwh_real = _num(_get(col.get("kwh_real")))
+            sin_fv = _num(_get(col.get("sin_fv")))
+            ahorro_kwh = _num(_get(col.get("ahorro_kwh")))
+            dolar_row = _num(_get(col.get("dolar")))
+            nota = _get(col.get("nota")) or ""
+            fecha = _date(_get(col.get("fecha"))) or inicio or dt.datetime.now().strftime("%Y-%m-%d")
 
             blended = total / kwh if kwh else 0.0
             dolar_ef = dolar_row or dolar
             saved = None
-            if ahorro_kwh and dolar_ef:
-                saved = {
-                    "fecha": fecha,
-                    "start": inicio or "",
-                    "end": fin or "",
-                    "ahorro_kwh": round(ahorro_kwh, 2),
-                    "ahorro_usd": round(ahorro_kwh * blended / float(dolar_ef), 2),
-                    "dolar": float(dolar_ef),
-                    "nota": nota,
-                }
+            if dolar_ef:
+                # ahorro directo (ARS): factura sin FV − factura con FV
+                ahorro_ars = (sin_fv - total) if (sin_fv and sin_fv > total) else 0.0
+                # ahorro kWh: consumo real medido − kWh facturados
+                ahorro_kwh_ef = ahorro_kwh
+                if (kwh_real and kwh_real > kwh) and not ahorro_kwh_ef:
+                    ahorro_kwh_ef = kwh_real - kwh
+                ahorro_usd = (ahorro_ars / float(dolar_ef)) if ahorro_ars else 0.0
+                if ahorro_usd or ahorro_kwh_ef:
+                    saved = {
+                        "fecha": fecha,
+                        "start": inicio or "",
+                        "end": fin or "",
+                        "ahorro_kwh": round(ahorro_kwh_ef or 0.0, 2),
+                        "ahorro_usd": round(ahorro_usd, 2),
+                        "dolar": float(dolar_ef),
+                        "nota": nota,
+                    }
             bill = {
                 "fecha": fecha,
                 "start": inicio or "",
