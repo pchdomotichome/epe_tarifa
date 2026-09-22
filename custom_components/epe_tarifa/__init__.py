@@ -39,9 +39,13 @@ def _block_total(kwh: float, tariff: dict) -> float:
 def _band_value(kwh: float, bands: list[dict]) -> float:
     result = 0.0
     for band in bands or []:
-        result = float(band.get("valor", 0))
-        if kwh <= float(band.get("hasta", 0)):
-            return result
+        desde = float(band.get("desde", 0))
+        hasta = float(band.get("hasta", 0))
+        valor = float(band.get("valor", 0))
+        if desde <= kwh <= hasta:
+            return valor
+        if kwh <= hasta and not band.get("desde"):
+            return valor
     return result
 
 
@@ -108,7 +112,7 @@ class EpeCoordinator:
 
     async def async_start(self) -> None:
         self._unsub_interval = async_track_time_interval(
-            self.hass, self._on_interval, dt.timedelta(hours=1)
+            self.hass, self._on_interval, dt.timedelta(hours=2)
         )
         self._unsub_state = async_track_state_change_event(
             self.hass, [SENSOR_EPE, SENSOR_HOME], self._on_state_change
@@ -133,7 +137,13 @@ class EpeCoordinator:
 
     # ------------------------------------------------------------------ dólar
 
-    async def async_refresh_dolar(self) -> bool:
+    async def async_refresh_dolar(self, force: bool = False) -> bool:
+        # solo consultar la API dentro de la ventana de mercado 08:00–16:00 local,
+        # salvo que se fuerce manualmente
+        if not force:
+            local = dt_util.now().astimezone(dt_util.get_time_zone(self.hass.config.time_zone))
+            if not (8 <= local.hour < 16):
+                return False
         try:
             session = async_get_clientsession(self.hass)
             async with session.get(DOLAR_URL, timeout=20) as resp:
@@ -255,11 +265,17 @@ class EpeCoordinator:
         except (TypeError, ValueError):
             dias = 60.0
         meses = dias / 30.0
-        kwh_meter = float(period.get("kwh_meter", 0) or 0)
-        trifasica_dia = float(period.get("trifasica_dia", 0) or 0)
 
         values: dict[str, Any] = {k: 0.0 for k, *_ in SENSORS}
         attrs: dict[str, Any] = {}
+
+        # Última factura registrada → fuente del dato real de la trifásica.
+        # La trifásica solo se conoce al cierre del período: kwh_factura − kwh_red.
+        bills_list = self.bills._data.get("list", [])
+        last_bill = bills_list[-1] if bills_list else {}
+        kwh_factura = float(last_bill.get("kwh_meter", 0) or 0)
+        trifasica = float(last_bill.get("kwh_trifasica", 0) or 0)
+        trifasica_dia = trifasica / dias if (trifasica > 0 and dias > 0) else 0.0
 
         kwh_epe_bill = kwh_home_bill = 0.0
         if period.get("start") and period.get("end"):
@@ -267,18 +283,13 @@ class EpeCoordinator:
             kwh_epe_bill = await self._sum_period(SENSOR_EPE, w_s, w_e)
             kwh_home_bill = await self._sum_period(SENSOR_HOME, w_s, w_e)
 
-        trifasica = max(0.0, kwh_meter - kwh_epe_bill)
-        if trifasica > 0:
-            trifasica_dia = trifasica / dias
-            period["trifasica_dia"] = round(trifasica_dia, 3)
-            await self.period.async_save(period)
-
         now = dt_util.utcnow()
         roll_start = now - dt.timedelta(days=dias)
         epe_roll = await self._sum_period(SENSOR_EPE, roll_start, now)
         home_roll = await self._sum_period(SENSOR_HOME, roll_start, now)
 
-        kwh_red_proj = epe_roll + trifasica_dia * dias
+        # proyección del período en curso: solo mediciones reales (sin trifásica)
+        kwh_red_proj = epe_roll
         proyectado = fancy_total(kwh_red_proj, tariff, meses)
 
         epe_state = self.hass.states.get(SENSOR_EPE)
@@ -297,25 +308,24 @@ class EpeCoordinator:
         values["kwh_home_periodo"] = round(kwh_home_bill, 2)
         values["kwh_trifasica_periodo"] = round(trifasica, 2)
         values["kwh_trifasica_dia"] = round(trifasica_dia, 3)
-        values["kwh_red_dia_estimado"] = round(epe_diario + trifasica_dia, 2)
+        values["kwh_red_dia_estimado"] = round(epe_diario, 2)
         values["kwh_red_proyectado"] = round(kwh_red_proj, 2)
         values["blended"] = round(blended, 2)
         values["total_proyectado_periodo"] = proyectado["total"]
-        values["costo_epe_dia"] = round((epe_diario + trifasica_dia) * blended, 0)
+        values["costo_epe_dia"] = round(epe_diario * blended, 0)
         values["costo_ahorro_dia"] = round(max(home_diario - epe_diario, 0) * blended, 0)
         values["costo_consumo_dia"] = round(home_diario * blended, 0)
         values["marginal_puro"] = round(marginal_puro, 2)
         values["marginal_fiscal"] = round(marginal_fiscal, 2)
-        values["kwh_factura_meter"] = round(kwh_meter, 0)
+        values["kwh_factura_meter"] = round(kwh_factura, 0)
         attrs["tariff_month"] = tariff.get("month")
         attrs["tariff"] = tariff
 
         total_factura = 0.0
         desvio = 0.0
-        if self.bills._data.get("list"):
-            last = self.bills._data["list"][-1]
-            total_factura = float(last.get("total_ars", 0))
-            proy = float(last.get("proyectado", 0))
+        if last_bill:
+            total_factura = float(last_bill.get("total_ars", 0))
+            proy = float(last_bill.get("proyectado", 0))
             if total_factura:
                 desvio = (total_factura - proy) / total_factura * 100
         values["total_factura_periodo"] = round(total_factura, 0)
@@ -366,12 +376,41 @@ class EpeCoordinator:
             bands = []
             for band in patch[CONF_CAP_BANDS]:
                 if isinstance(band, dict):
-                    bands.append({"hasta": float(band.get("hasta", 999999)), "valor": float(band.get("valor", 0))})
+                    try:
+                        bands.append({
+                            "desde": float(band.get("desde", 0)),
+                            "hasta": float(band.get("hasta", 999999)),
+                            "valor": float(band.get("valor", 0)),
+                        })
+                    except (TypeError, ValueError):
+                        continue
+            if bands:
+                self.tariff._data["cap_bands"] = bands
+        if patch.get("cap_bands_csv"):
+            bands = self._parse_cap_bands_csv(str(patch["cap_bands_csv"]))
             if bands:
                 self.tariff._data["cap_bands"] = bands
         await self.tariff.async_save(dict(self.tariff._data))
         await self.async_recompute()
         return dict(self.tariff._data)
+
+    @staticmethod
+    def _parse_cap_bands_csv(csv_text: str) -> list[dict]:
+        """Parsea el CSV de bandas del CUT: `kWh_bim_min;kWh_bim_max;ars_cap_mes` por línea."""
+        import csv as _csv
+
+        bands = []
+        for row in _csv.reader(csv_text.strip().splitlines(), delimiter=";"):
+            if len(row) < 3:
+                continue
+            try:
+                desde = float(row[0].strip().replace(",", "."))
+                hasta = float(row[1].strip().replace(",", "."))
+                valor = float(row[2].strip().replace(",", "."))
+            except ValueError:
+                continue
+            bands.append({"desde": desde, "hasta": hasta, "valor": valor})
+        return bands
 
     async def svc_set_period(self, call: ServiceCall) -> dict:
         data = call.data
@@ -392,7 +431,12 @@ class EpeCoordinator:
         data = call.data
         start = str(data[CONF_START])
         end = str(data[CONF_END])
-        kwh_meter = float(data[CONF_KWH_METER])
+        med_ant = data.get("medidor_anterior")
+        med_act = data.get("medidor_actual")
+        kwh_meter = data.get(CONF_KWH_METER)
+        if kwh_meter is None and med_ant is not None and med_act is not None:
+            kwh_meter = float(med_act) - float(med_ant)
+        kwh_meter = float(kwh_meter)
         total_ars = float(data[CONF_TOTAL_ARS])
         tstamp = dt.datetime.now().isoformat(timespec="seconds")
 
@@ -414,8 +458,14 @@ class EpeCoordinator:
 
         blended_real = total_ars / kwh_meter if kwh_meter > 0 else 0.0
         ahorro_kwh = max(kwh_home - kwh_epe, 0.0)
-        ahorro_ars = ahorro_kwh * blended_real
         dolar = self.dolar._data.get("venta")
+
+        # ahorro directo (ARS) si se pasa el total sin FV; si no, estimado por blended
+        total_sin_fv = data.get("total_sin_fv")
+        if total_sin_fv is not None and float(total_sin_fv) > total_ars:
+            ahorro_ars = float(total_sin_fv) - total_ars
+        else:
+            ahorro_ars = ahorro_kwh * blended_real
         ahorro_usd = ahorro_ars / dolar if dolar else None
         proyectado = fancy_total(kwh_meter, self.tariff._data, dias / 30.0)["total"] if kwh_meter > 0 else 0.0
         desvio = (total_ars - proyectado) / total_ars * 100 if total_ars > 0 else 0.0
@@ -425,11 +475,19 @@ class EpeCoordinator:
             "start": start,
             "end": end,
             "dias": dias,
+            "medidor_anterior": float(med_ant) if med_ant is not None else None,
+            "medidor_actual": float(med_act) if med_act is not None else None,
             "kwh_meter": kwh_meter,
             "kwh_epe_ha": round(kwh_epe, 2),
             "kwh_home_ha": round(kwh_home, 2),
             "kwh_trifasica": round(trifasica, 2),
             "total_ars": total_ars,
+            "total_sin_fv": float(total_sin_fv) if total_sin_fv is not None else None,
+            "detalle": {
+                k: round(float(data.get(k, 0) or 0), 2)
+                for k in ("basico", "ley6604", "ley7797", "cap", "iva", "ley12692")
+                if data.get(k) is not None
+            },
             "blended": round(blended_real, 2),
             "proyectado": round(proyectado, 0),
             "desvio_pct": round(desvio, 2),
@@ -469,7 +527,7 @@ class EpeCoordinator:
         return item
 
     async def svc_update_dolar(self, _call: ServiceCall) -> dict:
-        ok = await self.async_refresh_dolar()
+        ok = await self.async_refresh_dolar(force=True)
         return {"ok": ok, **self.dolar._data}
 
     async def svc_add_saved_period(self, call: ServiceCall) -> dict:
@@ -746,6 +804,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 vol.Optional(CONF_PCT_7797): cv.positive_float,
                 vol.Optional(CONF_PCT_IVA): cv.positive_float,
                 vol.Optional(CONF_CAP_BANDS): cv.ensure_list,
+                vol.Optional("cap_bands_csv"): cv.string,
             }
         ),
         coordinator.svc_update_tariff,
@@ -768,8 +827,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             {
                 vol.Required(CONF_START): cv.string,
                 vol.Required(CONF_END): cv.string,
-                vol.Required(CONF_KWH_METER): cv.positive_float,
+                vol.Optional(CONF_KWH_METER): vol.Any(cv.positive_float, None),
                 vol.Required(CONF_TOTAL_ARS): cv.positive_float,
+                vol.Optional("medidor_anterior"): vol.Any(cv.positive_float, None),
+                vol.Optional("medidor_actual"): vol.Any(cv.positive_float, None),
+                vol.Optional("total_sin_fv"): vol.Any(cv.positive_float, None),
+                vol.Optional("basico"): vol.Any(cv.positive_float, None),
+                vol.Optional("ley6604"): vol.Any(cv.positive_float, None),
+                vol.Optional("ley7797"): vol.Any(cv.positive_float, None),
+                vol.Optional("cap"): vol.Any(cv.positive_float, None),
+                vol.Optional("iva"): vol.Any(cv.positive_float, None),
+                vol.Optional("ley12692"): vol.Any(cv.positive_float, None),
             }
         ),
         coordinator.svc_register_bill,

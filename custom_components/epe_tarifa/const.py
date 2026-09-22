@@ -23,11 +23,11 @@ DEFAULT_TARIFF = {
     "pct_iva": 21.0,
     "ley12692": 230.81,
     "cap_bands": [
-        {"hasta": 120, "valor": 540.39},
-        {"hasta": 240, "valor": 1339.59},
-        {"hasta": 300, "valor": 5473.08},
-        {"hasta": 450, "valor": 8944.22},
-        {"hasta": 999999, "valor": 8944.22},
+        {"desde": 0, "hasta": 120, "valor": 540.39},
+        {"desde": 121, "hasta": 240, "valor": 1339.59},
+        {"desde": 241, "hasta": 300, "valor": 5473.08},
+        {"desde": 301, "hasta": 450, "valor": 8944.22},
+        {"desde": 451, "hasta": 999999, "valor": 8944.22},
     ],
 }
 
