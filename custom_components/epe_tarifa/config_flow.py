@@ -17,7 +17,6 @@ from homeassistant.helpers.selector import (
     NumberSelectorMode,
     TextSelector,
     TextSelectorConfig,
-    
 )
 
 from .const import (
@@ -159,7 +158,7 @@ def _num(min_v: float = 0, step: float | None = None):
                 vol.Required(CONF_PCT_IVA): _num(0, step=0.1),
                 vol.Required(CONF_LEY12692): _num(),
                 vol.Optional("cap_bands_csv"): TextSelector(
-                    TextSelectorConfig(mode="textarea")
+                    TextSelectorConfig(multiline=True)
                 ),
             }
         )
