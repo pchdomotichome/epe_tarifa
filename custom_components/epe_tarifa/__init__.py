@@ -210,6 +210,10 @@ class EpeCoordinator:
                     ts = st.last_updated
                 if ts is None:
                     continue
+                if isinstance(ts, str):
+                    ts = dt_util.parse_datetime(ts)
+                if ts is None:
+                    continue
                 day = ts.astimezone(local).strftime("%Y-%m-%d")
                 by_day[day] = max(by_day.get(day, 0.0), val)
             return sum(by_day.values())
