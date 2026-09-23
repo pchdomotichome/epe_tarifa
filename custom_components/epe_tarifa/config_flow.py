@@ -10,9 +10,15 @@ from __future__ import annotations
 import voluptuous as vol
 
 from homeassistant import config_entries
-from homeassistant.components.number import NumberSelector, NumberSelectorConfig, NumberSelectorMode
-from homeassistant.components.text import TextSelector, TextSelectorConfig, TextSelectorMode
-from homeassistant.helpers.selector import DateSelector
+from homeassistant.helpers.selector import (
+    DateSelector,
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
+    TextSelector,
+    TextSelectorConfig,
+    TextSelectorMode,
+)
 
 from .const import (
     CONF_ARS,
@@ -51,10 +57,7 @@ def _num(min_v: float = 0, step: float | None = None):
     kwargs: dict = {"min": min_v}
     if step is not None:
         kwargs["step"] = step
-    return NumberSelector(NumberSelectorConfig(mode=NumberSelectorMode.BOX, **kwargs))
-
-
-class EpeTarifaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+    return NumberSelector(NumberSelectorConfig(mode="box", **kwargs))
     """Flujo de EPE Tarifa: crear entrada o menú de operaciones."""
 
     VERSION = 1
