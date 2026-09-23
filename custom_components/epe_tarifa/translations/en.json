@@ -1,0 +1,129 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "EPE Tarifa",
+        "description": "Crea la integración con los valores por defecto (última factura). Luego ajustá cuadro tarifario y período desde el menú de configuración de la integración.",
+        "data": {}
+      },
+      "menu": {
+        "title": "EPE Tarifa y Amortización",
+        "description": "Elegí una operación para ejecutar.",
+        "menu_options": {
+          "add_purchase": "Agregar compra",
+          "update_tariff": "Actualizar CUT",
+          "register_bill": "Registrar factura",
+          "remove_purchase": "Eliminar compra",
+          "import_csv": "Importar histórico CSV",
+          "update_dolar": "Actualizar dólar"
+        }
+      },
+      "add_purchase": {
+        "title": "Agregar compra",
+        "description": "Registra una compra de inversión solar en el ledger para el cálculo de amortización.",
+        "data": {
+          "fecha": "Fecha de compra",
+          "producto": "Producto",
+          "usd": "Costo en USD",
+          "ars": "Costo en ARS"
+        }
+      },
+      "remove_purchase": {
+        "title": "Eliminar compra",
+        "description": "Elimina una compra del ledger por índice (0-based). Ver el atributo `ledger` de `sensor.epe_tarifa_datos`.",
+        "data": {
+          "index": "Índice (0-based)"
+        }
+      },
+      "update_tariff": {
+        "title": "Actualizar CUT",
+        "description": "Actualiza el cuadro tarifario vigente (mes, cuota, bloques, impuestos, ley 12692 y bandas CAP).",
+        "data": {
+          "month": "Mes de vigencia (AAAA-MM)",
+          "cuota_servicio": "Cuota de servicio",
+          "p1": "Precio P1 (primeros 150 kWh)",
+          "p2": "Precio P2 (siguientes 150 kWh)",
+          "p3": "Precio P3 (excedente)",
+          "pct_6604": "Ley 6604 (%)",
+          "pct_7797": "Ley 7797 (%)",
+          "pct_iva": "IVA (%)",
+          "ley12692": "Ley 12692 (ARS/mes)",
+          "cap_bands_csv": "Bandas CAP (CSV, opcional)"
+        }
+      },
+      "register_bill": {
+        "title": "Registrar factura",
+        "description": "Carga la factura real de EPE del período. El consumo se calcula como medidor_actual - medidor_anterior si no se indica.",
+        "data": {
+          "start": "Inicio de período",
+          "end": "Fin de período",
+          "kwh_meter": "Consumo (kWh)",
+          "medidor_anterior": "Medidor anterior",
+          "medidor_actual": "Medidor actual",
+          "total_ars": "Total facturado (ARS)",
+          "total_sin_fv": "Total sin FV (ARS)",
+          "basico": "Básico (ARS)",
+          "ley6604": "Ley 6604 (ARS)",
+          "ley7797": "Ley 7797 (ARS)",
+          "cap": "CAP (ARS)",
+          "iva": "IVA (ARS)",
+          "ley12692": "Ley 12692 (ARS)"
+        }
+      },
+      "import_csv": {
+        "title": "Importar histórico CSV",
+        "description": "Importa el histórico de facturas desde el CSV local (reemplaza bills y savings).",
+        "data": {
+          "path": "Ruta del CSV (relativa al config)"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "Ya existe una entrada de EPE Tarifa.",
+      "compra_agregada": "Compra agregada correctamente.",
+      "compra_eliminada": "Compra eliminada correctamente.",
+      "cut_actualizado": "CUT actualizado correctamente.",
+      "factura_registrada": "Factura registrada correctamente.",
+      "historico_importado": "Histórico importado correctamente.",
+      "dolar_actualizado": "Dólar actualizado correctamente.",
+      "error_servicio": "Error al ejecutar la operación. Revisá los logs de Home Assistant."
+    },
+    "error": {
+      "error_servicio": "No se pudo completar la operación. Revisá los logs."
+    }
+  },
+  "services": {
+    "update_tariff": {
+      "name": "Actualizar tarifa",
+      "description": "Actualiza el cuadro tarifario vigente."
+    },
+    "set_period": {
+      "name": "Definir período",
+      "description": "Fija la ventana del bimestre."
+    },
+    "register_bill": {
+      "name": "Registrar factura",
+      "description": "Carga la factura real para ahorro y desvío."
+    },
+    "add_purchase": {
+      "name": "Registrar compra",
+      "description": "Agrega gasto de inversión al ledger."
+    },
+    "remove_purchase": {
+      "name": "Eliminar compra",
+      "description": "Quita una compra del ledger."
+    },
+    "update_dolar_now": {
+      "name": "Actualizar dólar",
+      "description": "Refresca el dólar oficial."
+    },
+    "import_history_csv": {
+      "name": "Importar histórico CSV",
+      "description": "Importa facturas históricas y siembra ahorro."
+    },
+    "import_cut_month": {
+      "name": "Importar CUT",
+      "description": "Parsea un PDF del cuadro tarifario."
+    }
+  }
+}
