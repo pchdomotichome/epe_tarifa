@@ -57,6 +57,9 @@ def _num(min_v: float = 0, step: float | None = None):
     if step is not None:
         kwargs["step"] = step
     return NumberSelector(NumberSelectorConfig(mode="box", **kwargs))
+
+
+class EpeTarifaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Flujo de EPE Tarifa: crear entrada o menú de operaciones."""
 
     VERSION = 1
