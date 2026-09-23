@@ -771,6 +771,16 @@ class EpeCoordinator:
         return extracted
 
 
+async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
+    """Migra la entrada de configuración. El entry es data={} y no requiere migración real."""
+    _LOGGER.debug(
+        "Migrando entrada epe_tarifa de versión %s.%s",
+        config_entry.version,
+        config_entry.minor_version,
+    )
+    return True
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Crear coordinaador, plataformas y registrar servicios."""
     coordinator = EpeCoordinator(hass)
