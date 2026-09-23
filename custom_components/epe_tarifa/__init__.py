@@ -317,7 +317,7 @@ class EpeCoordinator:
             1 + float(tariff.get("pct_iva", 0)) / 100
         )
 
-        values["kwh_red_periodo"] = round(kwh_epe_bill, 2)
+        values["kwh_red_periodo_anterior"] = round(kwh_epe_bill, 2)
         values["kwh_red_periodo_actual"] = round(kwh_epe_actual, 2)
         values["kwh_home_periodo"] = round(kwh_home_bill, 2)
         values["kwh_trifasica_periodo"] = round(trifasica, 2)
