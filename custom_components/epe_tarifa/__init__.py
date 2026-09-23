@@ -852,8 +852,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             {
                 vol.Optional(CONF_FECHA): cv.string,
                 vol.Optional(CONF_PRODUCTO): cv.string,
-                vol.Required(CONF_USD): cv.positive_float,
-                vol.Required(CONF_ARS): cv.positive_float,
+                vol.Required(CONF_USD): vol.Coerce(float),
+                vol.Required(CONF_ARS): vol.Coerce(float),
             }
         ),
         coordinator.svc_add_purchase,
@@ -865,9 +865,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 vol.Optional("fecha"): cv.string,
                 vol.Optional(CONF_START): cv.string,
                 vol.Optional(CONF_END): cv.string,
-                vol.Required(CONF_AHORRO_KWH): cv.positive_float,
-                vol.Required(CONF_AHORRO_USD): cv.positive_float,
-                vol.Optional("dolar"): cv.positive_float,
+                vol.Required(CONF_AHORRO_KWH): vol.Coerce(float),
+                vol.Required(CONF_AHORRO_USD): vol.Coerce(float),
+                vol.Optional("dolar"): vol.Coerce(float),
                 vol.Optional("nota"): cv.string,
             }
         ),
