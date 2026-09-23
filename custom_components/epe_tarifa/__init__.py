@@ -288,12 +288,21 @@ class EpeCoordinator:
             kwh_home_bill = await self._sum_period(SENSOR_HOME, w_s, w_e)
 
         now = dt_util.utcnow()
-        roll_start = now - dt.timedelta(days=dias)
-        epe_roll = await self._sum_period(SENSOR_EPE, roll_start, now)
-        home_roll = await self._sum_period(SENSOR_HOME, roll_start, now)
 
-        # proyección del período en curso: solo mediciones reales (sin trifásica)
-        kwh_red_proj = epe_roll
+        # Período ACTUAL: desde el fin del período anterior (bimestre) hasta hoy.
+        # El `period` guardado apunta al bimestre ANTERIOR (la última factura), por lo
+        # que su `end` marca el inicio del bimestre en curso.
+        kwh_epe_actual = 0.0
+        dias_transcurridos = 0
+        if period.get("end"):
+            local = dt_util.get_time_zone(self.hass.config.time_zone)
+            fin_ant = dt.datetime.strptime(str(period["end"]), "%Y-%m-%d").replace(tzinfo=local)
+            inicio_actual = fin_ant.astimezone(dt_util.UTC)
+            kwh_epe_actual = await self._sum_period(SENSOR_EPE, inicio_actual, now)
+            dias_transcurridos = max((now - inicio_actual).days, 1)
+
+        # Proyección del bimestre en curso: promedio diario × dias (60).
+        kwh_red_proj = (kwh_epe_actual / dias_transcurridos) * dias if dias_transcurridos else 0.0
         proyectado = fancy_total(kwh_red_proj, tariff, meses)
 
         epe_state = self.hass.states.get(SENSOR_EPE)
@@ -309,6 +318,7 @@ class EpeCoordinator:
         )
 
         values["kwh_red_periodo"] = round(kwh_epe_bill, 2)
+        values["kwh_red_periodo_actual"] = round(kwh_epe_actual, 2)
         values["kwh_home_periodo"] = round(kwh_home_bill, 2)
         values["kwh_trifasica_periodo"] = round(trifasica, 2)
         values["kwh_trifasica_dia"] = round(trifasica_dia, 3)

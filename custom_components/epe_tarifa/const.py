@@ -47,7 +47,8 @@ DEFAULT_DOLAR = {
 
 SENSORS = [
     # (key, name, unit, icon, device_class, state_class, precision)
-    ("kwh_red_periodo", "EPE kWh red período", "kWh", "mdi:transmission-tower", "energy", "total", 2),
+    ("kwh_red_periodo", "EPE kWh red período anterior", "kWh", "mdi:transmission-tower", "energy", "total", 2),
+    ("kwh_red_periodo_actual", "EPE kWh red período actual", "kWh", "mdi:transmission-tower", "energy", "total", 2),
     ("kwh_home_periodo", "EPE kWh hogar período", "kWh", "mdi:home", "energy", "total", 2),
     ("kwh_trifasica_periodo", "EPE kWh fase trifásica período", "kWh", "mdi:engine", "energy", "total", 2),
     ("kwh_trifasica_dia", "EPE kWh trifásica por día (est.)", "kWh", "mdi:engine", "energy", "total", 3),
