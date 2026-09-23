@@ -10,6 +10,7 @@ from __future__ import annotations
 import voluptuous as vol
 
 from homeassistant import config_entries
+from homeassistant.components.text import TextSelectorMode
 from homeassistant.helpers.selector import (
     DateSelector,
     NumberSelector,
@@ -17,7 +18,6 @@ from homeassistant.helpers.selector import (
     NumberSelectorMode,
     TextSelector,
     TextSelectorConfig,
-    TextSelectorMode,
 )
 
 from .const import (
