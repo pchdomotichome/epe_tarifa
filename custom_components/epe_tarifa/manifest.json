@@ -15,5 +15,5 @@
   "requirements": [
     "pdfminer.six>=20221105"
   ],
-  "version": "0.1.21"
+  "version": "0.1.22"
 }
