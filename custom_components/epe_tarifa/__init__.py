@@ -370,6 +370,24 @@ class EpeCoordinator:
         attrs["ledger"] = self.ledger._data.get("list", [])
         attrs["savings"] = self.savings._data.get("list", [])
 
+        # Desglose 1:1 de la última factura como lista {concepto, monto} para
+        # tablas flex-table ("Concepto | Monto").
+        _CONCEPTOS = [
+            ("basico", "Básico (cuota + bloques)"),
+            ("ley6604", "Ley 6604"),
+            ("ley7797", "Ley 7797"),
+            ("cap", "CAP"),
+            ("iva", "IVA"),
+            ("ley12692", "Ley 12692"),
+        ]
+        detalle_lista = []
+        if last_bill:
+            d = last_bill.get("detalle") or {}
+            for key, label in _CONCEPTOS:
+                if key in d:
+                    detalle_lista.append({"concepto": label, "monto": float(d.get(key, 0) or 0)})
+        attrs["detalle_ultima"] = detalle_lista
+
         self.values = values
         self.attrs = attrs
 
