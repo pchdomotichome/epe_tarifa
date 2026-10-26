@@ -165,16 +165,20 @@ class EpeCoordinator:
         """Consumo de un contador dentro de la ventana.
 
         Estrategia:
-        1. Historial de estados reciente (máx por día local). Cubre solo la
-           ventana retenida por el recorder (purge ~10 días).
-        2. Estadísticas de largo plazo (retención permanente): la serie 'sum'
-           de un medidor es acumulada → el consumo de la ventana = último −
-           primero.
+        1. Estadísticas de largo plazo (retención permanente, no las toca el purge
+           del recorder): la serie 'sum' de un medidor es acumulada → el consumo de
+           la ventana = último − primero.
+        2. Historial de estados (máx por día local), solo como respaldo: cubre
+           únicamente la ventana retenida por el recorder (purge_keep_days).
+
+        El orden importa: el historial devuelve datos PARCIALES (y > 0) cuando la
+        ventana excede la retención, y eso cortaba el fallback dejando el consumo
+        subestimado.
         """
-        total = await self._sum_period_hist(entity, start, end)
+        total = await self._sum_period_stats(entity, start, end)
         if total > 0:
             return total
-        return await self._sum_period_stats(entity, start, end)
+        return await self._sum_period_hist(entity, start, end)
 
     async def _sum_period_hist(self, entity: str, start: dt.datetime, end: dt.datetime) -> float:
         try:
@@ -289,17 +293,36 @@ class EpeCoordinator:
 
         now = dt_util.utcnow()
 
-        # Período ACTUAL: desde el fin del período anterior (bimestre) hasta hoy.
+        # Período ACTUAL: desde el fin del período anterior (bimestre) hasta el cierre.
         # El `period` guardado apunta al bimestre ANTERIOR (la última factura), por lo
-        # que su `end` marca el inicio del bimestre en curso.
+        # que su `end` marca el inicio del bimestre en curso y es el único cierre real
+        # que conocemos.
+        #
+        # Mientras la factura no llegue, el cierre se estima con la regla histórica de
+        # EPE (+60 días; si cae sábado/domingo → lunes hábil). Cuando se registra la
+        # factura, `period.end` pasa a ser el cierre efectivo y la estimación se
+        # recalcula sola para el bimestre siguiente.
         kwh_epe_actual = 0.0
         dias_transcurridos = 0
-        if period.get("end"):
+        cierre_efectivo = period.get("end")
+        cierre_estimado = None
+        dias_para_cierre = None
+        if cierre_efectivo:
             local = dt_util.get_time_zone(self.hass.config.time_zone)
-            fin_ant = dt.datetime.strptime(str(period["end"]), "%Y-%m-%d").replace(tzinfo=local)
+            fin_ant = dt.datetime.strptime(str(cierre_efectivo), "%Y-%m-%d").replace(tzinfo=local)
+            est = fin_ant + dt.timedelta(days=60)
+            while est.weekday() >= 5:  # sábado o domingo → lunes hábil
+                est += dt.timedelta(days=1)
+            cierre_estimado = est
+            dias_para_cierre = (est.date() - now.astimezone(local).date()).days
             inicio_actual = fin_ant.astimezone(dt_util.UTC)
-            kwh_epe_actual = await self._sum_period(SENSOR_EPE, inicio_actual, now)
-            dias_transcurridos = max((now - inicio_actual).days, 1)
+            # La ventana se congela en el cierre estimado: los días posteriores ya
+            # pertenecen al bimestre siguiente, que todavía no tiene factura.
+            # shortcut: si la factura demora más de un bimestre, la ventana queda
+            # congelada y el consumo posterior no se cuenta hasta registrarla.
+            fin_ventana = min(now, est.astimezone(dt_util.UTC))
+            kwh_epe_actual = await self._sum_period(SENSOR_EPE, inicio_actual, fin_ventana)
+            dias_transcurridos = max((fin_ventana - inicio_actual).days, 1)
 
         # Proyección del bimestre en curso: promedio diario × dias (60).
         kwh_red_proj = (kwh_epe_actual / dias_transcurridos) * dias if dias_transcurridos else 0.0
@@ -369,6 +392,14 @@ class EpeCoordinator:
         attrs["bills"] = self.bills._data.get("list", [])
         attrs["ledger"] = self.ledger._data.get("list", [])
         attrs["savings"] = self.savings._data.get("list", [])
+
+        # Cierre del bimestre: `efectivo` es el real (última factura registrada) y
+        # `estimado` el que se usa mientras la factura no llega (regla +60 → lunes).
+        # Cuando el estimado ya pasó, el bimestre está cerrado pero sin facturar.
+        attrs["cierre_efectivo"] = cierre_efectivo
+        attrs["cierre_estimado"] = cierre_estimado.strftime("%Y-%m-%d") if cierre_estimado else None
+        attrs["dias_para_cierre"] = dias_para_cierre
+        attrs["factura_pendiente"] = bool(dias_para_cierre is not None and dias_para_cierre < 0)
 
         # Desglose 1:1 de la última factura como lista {concepto, monto} para
         # tablas flex-table ("Concepto | Monto").
