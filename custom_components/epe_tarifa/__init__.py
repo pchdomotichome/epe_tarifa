@@ -293,40 +293,71 @@ class EpeCoordinator:
 
         now = dt_util.utcnow()
 
-        # Período ACTUAL: desde el fin del período anterior (bimestre) hasta el cierre.
-        # El `period` guardado apunta al bimestre ANTERIOR (la última factura), por lo
-        # que su `end` marca el inicio del bimestre en curso y es el único cierre real
-        # que conocemos.
+        # Período EN CURSO y período CERRADO sin facturar.
         #
-        # Mientras la factura no llegue, el cierre se estima con la regla histórica de
-        # EPE (+60 días; si cae sábado/domingo → lunes hábil). Cuando se registra la
-        # factura, `period.end` pasa a ser el cierre efectivo y la estimación se
-        # recalcula sola para el bimestre siguiente.
+        # `period.end` es el último cierre REAL conocido (la última factura registrada).
+        # Los bimestres siguientes se cierran con la regla histórica de EPE (+60 días;
+        # si cae sábado/domingo → lunes hábil). Cuando el cierre estimado vence, el
+        # bimestre se da por cerrado y ARRANCA el siguiente aunque la factura no haya
+        # llegado: la ventana nunca se congela.
+        #
+        # - `kwh_cerrado`    = consumo medido del último bimestre cerrado sin facturar
+        #                      (= lo que va a facturar EPE cuando llegue el papel).
+        # - `kwh_epe_actual` = consumo medido del bimestre en curso, hasta hoy.
+        # Los dos se suman sin solape ni hueco: cerrado = [cierre anterior, corte),
+        # abierto = [corte, ahora).
         kwh_epe_actual = 0.0
+        kwh_cerrado = 0.0
         dias_transcurridos = 0
-        cierre_efectivo = period.get("end")
-        cierre_estimado = None
         dias_para_cierre = None
+        cierre_efectivo = period.get("end")
+        cierre_pendiente = None
+        inicio_actual = None
+        fin_actual = None
         if cierre_efectivo:
             local = dt_util.get_time_zone(self.hass.config.time_zone)
-            fin_ant = dt.datetime.strptime(str(cierre_efectivo), "%Y-%m-%d").replace(tzinfo=local)
-            est = fin_ant + dt.timedelta(days=60)
-            while est.weekday() >= 5:  # sábado o domingo → lunes hábil
-                est += dt.timedelta(days=1)
-            cierre_estimado = est
-            dias_para_cierre = (est.date() - now.astimezone(local).date()).days
-            inicio_actual = fin_ant.astimezone(dt_util.UTC)
-            # La ventana se congela en el cierre estimado: los días posteriores ya
-            # pertenecen al bimestre siguiente, que todavía no tiene factura.
-            # shortcut: si la factura demora más de un bimestre, la ventana queda
-            # congelada y el consumo posterior no se cuenta hasta registrarla.
-            fin_ventana = min(now, est.astimezone(dt_util.UTC))
-            kwh_epe_actual = await self._sum_period(SENSOR_EPE, inicio_actual, fin_ventana)
-            dias_transcurridos = max((fin_ventana - inicio_actual).days, 1)
+            corte = dt.datetime.strptime(str(cierre_efectivo), "%Y-%m-%d").replace(tzinfo=local)
+            hoy = now.astimezone(local)
+            # Avanzar hasta el bimestre que contiene a hoy. Cada vuelta cierra el
+            # anterior con la regla estimada.
+            # shortcut: si se acumulan varios bimestres sin facturar solo se informa
+            # el último cerrado, no la suma de todos.
+            while True:
+                fin = corte + dt.timedelta(days=60)
+                while fin.weekday() >= 5:  # sábado o domingo → lunes hábil
+                    fin += dt.timedelta(days=1)
+                if fin.date() > hoy.date():
+                    break
+                cierre_pendiente = fin
+                kwh_cerrado = await self._sum_period(
+                    SENSOR_EPE, corte.astimezone(dt_util.UTC), fin.astimezone(dt_util.UTC)
+                )
+                corte = fin
+            inicio_actual = corte.astimezone(dt_util.UTC)
+            fin_actual = fin
+            kwh_epe_actual = await self._sum_period(SENSOR_EPE, inicio_actual, now)
+            dias_transcurridos = max((now - inicio_actual).days, 1)
+            dias_para_cierre = (fin.date() - hoy.date()).days
 
-        # Proyección del bimestre en curso: promedio diario × dias (60).
-        kwh_red_proj = (kwh_epe_actual / dias_transcurridos) * dias if dias_transcurridos else 0.0
+        # Proyección: si hay un bimestre cerrado sin facturar, ese total medido ES lo
+        # que va a facturar EPE. Si no, se proyecta el bimestre en curso con el
+        # promedio diario × días del período.
+        if kwh_cerrado > 0:
+            kwh_red_proj = kwh_cerrado
+        elif dias_transcurridos:
+            kwh_red_proj = (kwh_epe_actual / dias_transcurridos) * dias
+        else:
+            kwh_red_proj = 0.0
         proyectado = fancy_total(kwh_red_proj, tariff, meses)
+
+        # Tope de consumo diario para no pasar cada banda en el bimestre en curso.
+        promedio_dia_actual = kwh_epe_actual / dias_transcurridos if dias_transcurridos else 0.0
+        dias_restantes = dias_para_cierre if (dias_para_cierre or 0) > 0 else 0
+        if dias_restantes:
+            max_dia_b1 = max(BLOCKS - kwh_epe_actual, 0.0) / dias_restantes
+            max_dia_b2 = max(2 * BLOCKS - kwh_epe_actual, 0.0) / dias_restantes
+        else:
+            max_dia_b1 = max_dia_b2 = 0.0
 
         epe_state = self.hass.states.get(SENSOR_EPE)
         home_state = self.hass.states.get(SENSOR_HOME)
@@ -347,6 +378,9 @@ class EpeCoordinator:
         values["kwh_trifasica_dia"] = round(trifasica_dia, 3)
         values["kwh_red_dia_estimado"] = round(epe_diario, 2)
         values["kwh_red_proyectado"] = round(kwh_red_proj, 2)
+        values["kwh_promedio_dia_actual"] = round(promedio_dia_actual, 2)
+        values["kwh_max_dia_banda1"] = round(max_dia_b1, 2)
+        values["kwh_max_dia_banda2"] = round(max_dia_b2, 2)
         values["blended"] = round(blended, 2)
         values["total_proyectado_periodo"] = proyectado["total"]
         values["costo_epe_dia"] = round(epe_diario * blended, 0)
@@ -393,13 +427,15 @@ class EpeCoordinator:
         attrs["ledger"] = self.ledger._data.get("list", [])
         attrs["savings"] = self.savings._data.get("list", [])
 
-        # Cierre del bimestre: `efectivo` es el real (última factura registrada) y
-        # `estimado` el que se usa mientras la factura no llega (regla +60 → lunes).
-        # Cuando el estimado ya pasó, el bimestre está cerrado pero sin facturar.
+        # Períodos: `efectivo` es el último cierre real (última factura registrada);
+        # `pendiente` el cierre estimado del bimestre que cerró sin factura (si lo
+        # hay); `periodo_actual_*` la ventana del bimestre en curso.
         attrs["cierre_efectivo"] = cierre_efectivo
-        attrs["cierre_estimado"] = cierre_estimado.strftime("%Y-%m-%d") if cierre_estimado else None
-        attrs["dias_para_cierre"] = dias_para_cierre
-        attrs["factura_pendiente"] = bool(dias_para_cierre is not None and dias_para_cierre < 0)
+        attrs["cierre_pendiente"] = cierre_pendiente.strftime("%Y-%m-%d") if cierre_pendiente else None
+        attrs["factura_pendiente"] = cierre_pendiente is not None
+        attrs["periodo_actual_inicio"] = dt_util.as_local(inicio_actual).strftime("%Y-%m-%d") if inicio_actual else None
+        attrs["periodo_actual_cierre"] = fin_actual.strftime("%Y-%m-%d") if fin_actual else None
+        attrs["dias_restantes_periodo"] = dias_para_cierre
 
         # Desglose 1:1 de la última factura como lista {concepto, monto} para
         # tablas flex-table ("Concepto | Monto").
